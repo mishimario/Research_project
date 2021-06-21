@@ -1,0 +1,23 @@
+config:
+  data_options:
+    eval:
+      batch_size: 4
+      output_size: [360, 640, 3]
+    train:
+      batch_size: 4
+      buffer_size: 3168
+      normalize_exams: true
+      output_size: [360, 640, 3]
+  deploy_options:
+    LearningRateScheduler: 'lambda epoch, current_lr: 0.001 * 0.96 ** (epoch // 1000)'
+    enable_multigpu: false
+    loss:
+      class_name: WeightedCrossentropy
+      config: {weight_mul: 3.0}
+    optimizer: adam
+  model: UNetAnnotator
+  model_options: {bn: true, conv_stride: 1, kernel_size: 3, n_downsample: 4, n_filters_first: 3,
+    padding: same, rate: 2}
+data_path: segmentator\data\JPEGImages3168
+label_path: segmentator\data\SegmentationClass3168_yolo
+save_path: results

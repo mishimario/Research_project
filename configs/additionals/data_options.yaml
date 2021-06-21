@@ -1,0 +1,9 @@
+data_options:
+    train:
+        batch_size: 4
+        buffer_size: 3168
+        normalize_exams: true
+        output_size: [360, 640, 3]
+    eval:
+        batch_size: 4
+        output_size: [360, 640, 3]
