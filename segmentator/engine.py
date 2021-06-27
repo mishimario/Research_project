@@ -108,11 +108,11 @@ class TFKerasModel():
             dataset,
             validation_data=val_data,
             callbacks=callbacks,
-            steps_per_epoch=1,
+            steps_per_epoch=None,
             epochs=max_steps,
             validation_freq=save_freq,
             initial_epoch=self.current_step,
-            verbose=0,
+            verbose=1,
             shuffle=True
         )
         self._exit_strategy_section()
@@ -189,6 +189,9 @@ class TFKerasModel():
     def load(self, path):
         self.model.load_weights(path)
         return self
+
+    def summary(self):
+        return self.model.summary()
 
     def _saving_hook(self):
         return

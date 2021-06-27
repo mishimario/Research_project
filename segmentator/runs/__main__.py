@@ -22,6 +22,7 @@ def main(prog='python3 -m segmentator.runs'):
     parser = dsargparse.ArgumentParser(main=main, prog=prog)
     subparsers = parser.add_subparsers(help='command')
     subparsers.add_parser(train.train, add_arguments_auto=True)
+    subparsers.add_parser(predict.predict, add_arguments_auto=True)
     #subparsers.add_parser(evaluate.evaluate)
     # subparsers.add_parser(data.generate_tfrecords, add_arguments_auto=True)
     return parser.parse_and_run()

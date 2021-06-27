@@ -43,6 +43,8 @@ def train_ds(
     ds = ds.batch(batch_size)
     ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
 
+    print(len(ds))
+
     return ds
 
 
@@ -79,10 +81,21 @@ def predict_ds(path):
     generate dataset for prediction
     '''
     ds = base(path)
-    ds = to_feature_label(ds)
-    ds = ds.batch(batch_size)
+    ds = ds.batch(1)
     return ds
 
+def data_process_after_predict(results):
+    rabel=tf.constant([[0,0,0],[61,61,245],[51,221,255],[178,80,80],[36,179,83],[250,50,83],[250,250,55]])
+    results = results.map(lambda x: x==tf.expand_dims(tf.math.reduce_max(x,axis=-1),axis=-1))
+    results = results.map(lambda x: tf.cast(x, dtype=tf.int32), tf.data.experimental.AUTOTUNE)
+    print(results)
+    s=iter(results).get_next().shape
+    #results = results.map(lambda x: 1 if x==max_results else 0)
+    results = results.map(lambda x: tf.math.add_n([tf.expand_dims(x[:,:,i],axis=-1)*tf.reshape(tf.tile(rabel[i],[s[0]*s[1]]),(s[0],s[1],3)) for i in range(len(rabel))]))
+    print(len(results))
+    print(results)
+
+    return results
 
 def base(path, label_path=None, output_size=(360, 640, 3), dtype=tf.float32):
     '''
@@ -162,7 +175,12 @@ def base(path, label_path=None, output_size=(360, 640, 3), dtype=tf.float32):
         label_im = label_im.map(lambda x: tf.cast(x, dtype=dtype), tf.data.experimental.AUTOTUNE)
         #label_im = label_im.map(lambda x: x / 255.0, tf.data.experimental.AUTOTUNE)
 
-    return tf.data.Dataset.zip((im, label_im))
+        image_label_ds = tf.data.Dataset.zip((im, label_im))
+
+        print(image_label_ds)
+
+
+    return image_label_ds
 
 
 

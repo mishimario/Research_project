@@ -60,8 +60,9 @@ def train(
         data_path=data_path[0],
         label_path=data_path[1]
     )
-    
+
     ds = data.train_ds(data_path[0], data_path[1], **config['data_options']['train'])
+    print(len(ds))
     if validate:
         assert val_data_path is not None
         val_ds = data.eval_ds(val_data_path, **config['data_options']['eval'])
