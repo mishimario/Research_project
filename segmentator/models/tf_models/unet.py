@@ -89,7 +89,8 @@ class UNet(Layer):
 
     def build(self, input_shape):
         self.encoder_output_shape, self.ref_shapes = self.encoder.build(input_shape)
-        decoder_out = self.decoder.build(self.encoder_output_shape, self.ref_shapes)
+        self.latent_output_shape = self.latent.build(self.encoder_output_shape)
+        decoder_out = self.decoder.build(self.latent_output_shape, self.ref_shapes)
         self.built = True
         return decoder_out
 
