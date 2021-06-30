@@ -99,7 +99,7 @@ class Latent(Layer):
     ):
         super().__init__(self, **kargs)
         self.configs = dict(
-            filters=filters,
+            filters=filters_first*2**(n_downsample),
             rate=rate,
             kernel_size=kernel_size,
             conv_stride=conv_stride,

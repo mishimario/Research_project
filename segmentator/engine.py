@@ -231,8 +231,8 @@ class TFKerasModel():
         model = getattr(tf_models, model_name)(**model_config['model_options'])
 
         if 'loss' in deploy_options:
-            #deploy_options['loss'] = tf.keras.losses.get(deploy_options['loss'])
-            deploy_options['loss'] = tf.keras.losses.CategoricalCrossentropy()
+            deploy_options['loss'] = tf.keras.losses.get(deploy_options['loss'])
+            #deploy_options['loss'] = tf.keras.losses.CategoricalCrossentropy()
         #deploy_options['metrics'] = list(map(custom_metrics.solve_metric, deploy_options.get('metrics', [])))
         deploy_options['metrics'] = 'categorical_accuracy'
 
