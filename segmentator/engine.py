@@ -72,7 +72,7 @@ class TFKerasModel():
         dataset: tf.data.Dataset,
         val_data=None,
         save_path=None,
-        save_freq=100,
+        save_freq=100,#not nesessary
         max_steps=None,
         early_stop_steps=None,
         visualization=None,

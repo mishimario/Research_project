@@ -2,17 +2,17 @@ FROM tensorflow/tensorflow:2.1.0-gpu-py3
 
 RUN apt-get update && apt-get install -y git
 
-WORKDIR /kw_resources/Research_with_MAZDA
+RUN git clone https://github.com/mishimario/Research_project
 
-RUN cp requirements.txt /tmp
+WORKDIR Research_project
 
 RUN pip install -r requirements.txt
 
 CMD python3 -m segmentator train \
     --config \
-        /kw_resources/Research_with_MAZDA/configs/unet.yaml \
-        /kw_resources/Research_with_MAZDA/configs/additionals/data_options.yaml \
-        /kw_resources/Research_with_MAZDA/configs/additionals/deploy_options.yaml \
+        configs/unet.yaml \
+        configs/additionals/data_options.yaml \
+        configs/additionals/deploy_options.yaml \
     --save_path /kw_resources/Research_with_MAZDA/results \
     --data_path \
         /kw_resources/Research_with_MAZDA/segmentator/data/JPEGImages3168 \

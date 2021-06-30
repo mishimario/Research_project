@@ -80,6 +80,68 @@ class Downsample(Layer):
         half = self.pool(conv, training=training)
         return conv, half
 
+class Latent(Layer):
+    '''latent block'''
+    def __init__(
+        self,
+        filters_first,
+        n_downsample,
+        rate,
+        kernel_size,
+        conv_stride,
+        bn,
+        n_conv=2,
+        trainable=True,
+        padding='valid',
+        activation='relu',
+        kernel_regularizer=None,
+        **kargs,
+    ):
+        super().__init__(self, **kargs)
+        self.configs = dict(
+            filters=filters,
+            rate=rate,
+            kernel_size=kernel_size,
+            conv_stride=conv_stride,
+            bn=bn,
+            n_conv=n_conv,
+            trainable=trainable,
+            padding=padding,
+            activation=activation,
+            kernel_regularizer=kernel_regularizer,
+        )
+        self.padding = padding
+        convs = [
+            layers.Conv2D(
+                filters_first*2**(n_downsample), kernel_size, strides=conv_stride, padding=self.padding, activation=activation, trainable=trainable,
+                kernel_regularizer=kernel_regularizer,
+            )
+            for i in range(n_conv)
+        ]
+
+        if bn:
+            self.batchnorms = [layers.BatchNormalization(trainable=trainable) for i in range(n_conv)]
+            convs = [layer for tup in zip(convs, self.batchnorms) for layer in tup]
+
+        self.convchain = keras.Sequential(convs)
+        return
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(self.configs)
+        return config
+
+    def build(self, input_shape):
+        self.convchain.build(input_shape)
+        conv_output_shape = self.convchain.compute_output_shape(input_shape)
+        self.built = True
+        return conv_output_shape
+
+    @tf.function
+    def call(self, inputs, training):
+        conv = self.convchain(inputs, training=training)
+        return conv
+
 
 class Upsample(Layer):
     """upsampling block"""

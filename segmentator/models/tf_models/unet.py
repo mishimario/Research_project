@@ -58,6 +58,18 @@ class UNet(Layer):
             trainable=trainable,
             kernel_regularizer=kernel_regularizer,
         )
+        self.latent = components.Latent(
+            filters_first=filters_first,
+            n_downsample=n_downsample,
+            rate=rate,
+            kernel_size=kernel_size,
+            conv_stride=conv_stride,
+            bn=bn,
+            padding=padding,
+            activation=activation,
+            trainable=trainable,
+            kernel_regularizer=kernel_regularizer,
+        )
         self.decoder = components.Decoder(
             rate=rate,
             kernel_size=kernel_size,
@@ -84,7 +96,8 @@ class UNet(Layer):
     @tf.function
     def call(self, inputs, training=False):
         res_list, downsampled = self.encoder(inputs=inputs, training=training)
-        output = self.decoder(inputs=downsampled, res_list=res_list, training=training)
+        latent_output = self.latent(inputs=downsampled, training=training)
+        output = self.decoder(inputs=latent_output, res_list=res_list, training=training)
         return output
 
 
