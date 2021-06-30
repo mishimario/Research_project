@@ -177,7 +177,7 @@ class Upsample(Layer):
         self.rate = rate
         self.padding = padding
         self.activation = activation
-        self.conv_transpose = layers.Convolution2DTranspose(
+        self.conv_transpose = layers.Conv2DTranspose(
             filters=filters, kernel_size=rate, strides=rate, kernel_regularizer=kernel_regularizer,
             padding=self.padding, activation=None, trainable=trainable)
 
@@ -205,7 +205,7 @@ class Upsample(Layer):
         '''
             input_shapes: [ (inputs.shape), (reference.shape) ]
         '''
-        self.conv_transpose.build(input_shape)
+        #self.conv_transpose.build(input_shape)
         conv_output_shape = self.conv_transpose.compute_output_shape(input_shape)
         convchain_input_shape = (*conv_output_shape[:3], + conv_output_shape[3] + ref_shape[3])
         self.convchain.build(convchain_input_shape)
