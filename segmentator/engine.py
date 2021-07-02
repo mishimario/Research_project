@@ -112,7 +112,7 @@ class TFKerasModel():
             epochs=max_steps,
             validation_freq=save_freq,
             initial_epoch=self.current_step,
-            verbose=1,
+            verbose=0,
             shuffle=True
         )
         self._exit_strategy_section()

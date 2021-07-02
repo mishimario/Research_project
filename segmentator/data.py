@@ -115,7 +115,7 @@ def base(path, label_path=None, output_size=(360, 640, 3), dtype=tf.float32):
         #pattern = list(map(lambda x: os.path.join(x, *'*' * 1), path))
         pattern = os.path.join(path, *'*' * 1)
         #im = tf.data.Dataset.from_tensor_slices(pattern)
-        impath = tf.data.Dataset.list_files(pattern)
+        impath = tf.data.Dataset.list_files(pattern, shuffle=False)
         #im = tf.data.Dataset.from_tensor_slices(im) いらない？
         im = impath.map(lambda x: tf.io.read_file(x), tf.data.experimental.AUTOTUNE)
         im = im.map(lambda x: tf.io.decode_image(x, channels=3), tf.data.experimental.AUTOTUNE)
@@ -128,7 +128,7 @@ def base(path, label_path=None, output_size=(360, 640, 3), dtype=tf.float32):
         if label_path is None: return im
 
         label_pattern = os.path.join(label_path, *'*' * 1)
-        label_impath = tf.data.Dataset.list_files(label_pattern)
+        label_impath = tf.data.Dataset.list_files(label_pattern, shuffle=False)
 
         assert len(label_impath)==len(impath), "入力画像と教師画像の枚数が異なります"
 
@@ -163,6 +163,7 @@ def base(path, label_path=None, output_size=(360, 640, 3), dtype=tf.float32):
         #iterator = iter(label_im)
         #print(iterator.get_next())
         label_im = label_im.map(lambda x: tf.stack([x[i,:,:,0]*x[i,:,:,1]*x[i,:,:,2] for i in range(cnum)],axis=-1))
+
         print(label_im)
         print(len(label_im))
         print(label_im)
@@ -171,6 +172,7 @@ def base(path, label_path=None, output_size=(360, 640, 3), dtype=tf.float32):
         #print(iterator.get_next())
         #print(tf.shape(label_im))
         assert iterator.get_next().shape==(360,640,7), "shape_error"
+        print(tf.reduce_sum(iterator.get_next()))
 
         label_im = label_im.map(lambda x: tf.cast(x, dtype=dtype), tf.data.experimental.AUTOTUNE)
         #label_im = label_im.map(lambda x: x / 255.0, tf.data.experimental.AUTOTUNE)
