@@ -31,8 +31,11 @@ def tf_weighted_crossentropy(label, pred, weight=None, weight_add=0, weight_mul=
     weight = weight_mul * weight + weight_add
     _, _, a = label.shape
     with tf.control_dependencies([tf.debugging.assert_greater_equal(weight, 0.0, name='assert_on_weight')]):
-        weight_mask = label * weight + tf.cast(tf.stack([tf.map_fn(fn=lambda x: 1 if x==0 else 0,elems=elem) for elem in tf.unstack(label)]),label.dtype)
+        weight_mask = label * weight + tf.cast(label==0,label.dtype)
+        print(weight_mask.shape)
 
+        #+ tf.cast(tf.stack([tf.map_fn(fn=lambda x: 1 if x==0 else 0,elems=elem) for elem in tf.unstack(label)]),label.dtype)
+    print(tf.cast(label==1,label.dtype).shape)
     label = tf.expand_dims(label, -1)
     bce = tf.keras.losses.BinaryCrossentropy(reduction=tf.losses.Reduction.NONE, from_logits=from_logits)
     loss = bce(label, pred, sample_weight=weight_mask)
@@ -97,7 +100,7 @@ def tf_get_positive_rate(label):
     lowbound = tf.debugging.assert_greater_equal(min_value, 0.0, name='assert_on_min')
 
     with tf.control_dependencies([upbound, lowbound]):
-        positive_rate = tf.reduce_sum(label) / tf.cast(tf.reduce_prod(tf.shape(label)), tf.float32)
+        positive_rate = tf.reduce_sum(label,[1,2]) / tf.cast(tf.reduce_prod(tf.shape(label)[1:]), tf.float32)
 
     assert_range = [
         tf.debugging.assert_greater_equal(positive_rate, 0.0, name='assert_on_range_lower'),
