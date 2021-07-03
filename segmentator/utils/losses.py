@@ -19,14 +19,17 @@ def tf_weighted_crossentropy(label, pred, weight=None, weight_add=0, weight_mul=
     '''
     calculates weighted loss
     '''
+    print(label.shape)
     if tf.shape(label)[0] == 0:
         return tf.zeros([0], dtype=pred.dtype)
 
     if weight is None:
         positive_rate = tf_get_positive_rate(label)
+        print(positive_rate.shape)
         weight = 1 / positive_rate if positive_rate > 0.0 else 1.0
 
     weight = weight_mul * weight + weight_add
+    _, _, a = label.shape
     with tf.control_dependencies([tf.debugging.assert_greater_equal(weight, 0.0, name='assert_on_weight')]):
         weight_mask = label * weight + tf.cast(tf.stack([tf.map_fn(fn=lambda x: 1 if x==0 else 0,elems=elem) for elem in tf.unstack(label)]),label.dtype)
 
@@ -59,6 +62,8 @@ class TFWeightedCrossentropy(tf.keras.losses.Loss):
 
     def call(self, y_true, y_pred):
         y_pred_logits = y_pred._keras_logits
+        _, _, _, a=y_pred_logits.shape
+        print(y_true.shape)
         if self.label_smoothing:
             y_true = tf.expand_dims(y_true, -1)
             y_true = tfa.image.gaussian_filter2d(
@@ -66,9 +71,9 @@ class TFWeightedCrossentropy(tf.keras.losses.Loss):
             )
             y_true = tf.squeeze(y_true, -1)
         loss = tf.stack([tf_weighted_crossentropy(
-            y_true, y, from_logits=True,
+            y_true[:,:,:,i], y_pred_logits[:,:,:,i], from_logits=True,
             weight=self.weight, weight_add=self.weight_add, weight_mul=self.weight_mul,
-        ) for y in tf.unstack(y_pred_logits,axis=-1)])
+        ) for i in range(a)])
         return tf.math.reduce_sum(loss)
 
     def get_config(self):

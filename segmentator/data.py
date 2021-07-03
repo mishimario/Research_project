@@ -41,7 +41,7 @@ def train_ds(
     )
     ds = ds.shuffle(buffer_size, reshuffle_each_iteration=True)
     ds = ds.batch(batch_size)
-    ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
+    ds = ds.prefetch(tf.data.AUTOTUNE)
 
     print(len(ds))
 
