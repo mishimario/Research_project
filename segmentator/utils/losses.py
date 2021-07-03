@@ -19,27 +19,33 @@ def tf_weighted_crossentropy(label, pred, weight=None, weight_add=0, weight_mul=
     '''
     calculates weighted loss
     '''
-    print(label.shape)
     if tf.shape(label)[0] == 0:
         return tf.zeros([0], dtype=pred.dtype)
 
     if weight is None:
         positive_rate = tf_get_positive_rate(label)
-        print(positive_rate.shape)
-        weight = 1 / positive_rate if positive_rate > 0.0 else 1.0
+        #weight = 1 / positive_rate if positive_rate > 0.0 else 1.0
+        positive_rate =  positive_rate + tf.cast(positive_rate==0,positive_rate.dtype)
+        weight = 1 / positive_rate
 
     weight = weight_mul * weight + weight_add
-    _, _, a = label.shape
+
+    weight = tf.expand_dims(weight,-1)
+    weight = tf.expand_dims(weight,-1)
+
     with tf.control_dependencies([tf.debugging.assert_greater_equal(weight, 0.0, name='assert_on_weight')]):
         weight_mask = label * weight + tf.cast(label==0,label.dtype)
-        print(weight_mask.shape)
+        #print(weight_mask.shape)
 
         #+ tf.cast(tf.stack([tf.map_fn(fn=lambda x: 1 if x==0 else 0,elems=elem) for elem in tf.unstack(label)]),label.dtype)
-    print(tf.cast(label==1,label.dtype).shape)
+    #print(weight.shape)
     label = tf.expand_dims(label, -1)
+    pred = tf.expand_dims(pred, -1)
     bce = tf.keras.losses.BinaryCrossentropy(reduction=tf.losses.Reduction.NONE, from_logits=from_logits)
     loss = bce(label, pred, sample_weight=weight_mask)
+    #print(loss.shape)
     loss = tf.reduce_mean(loss, [1, 2])
+    #print(loss.shape)
     return loss
 
 
@@ -66,7 +72,6 @@ class TFWeightedCrossentropy(tf.keras.losses.Loss):
     def call(self, y_true, y_pred):
         y_pred_logits = y_pred._keras_logits
         _, _, _, a=y_pred_logits.shape
-        print(y_true.shape)
         if self.label_smoothing:
             y_true = tf.expand_dims(y_true, -1)
             y_true = tfa.image.gaussian_filter2d(
@@ -77,7 +82,7 @@ class TFWeightedCrossentropy(tf.keras.losses.Loss):
             y_true[:,:,:,i], y_pred_logits[:,:,:,i], from_logits=True,
             weight=self.weight, weight_add=self.weight_add, weight_mul=self.weight_mul,
         ) for i in range(a)])
-        return tf.math.reduce_sum(loss)
+        return tf.reduce_mean(loss,0)
 
     def get_config(self):
         config = super().get_config()

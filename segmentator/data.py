@@ -39,9 +39,9 @@ def train_ds(
         label_path,
         output_size=output_size,
     )
-    ds = ds.shuffle(buffer_size, reshuffle_each_iteration=True)
+    #ds = ds.shuffle(buffer_size, reshuffle_each_iteration=True)
     ds = ds.batch(batch_size)
-    ds = ds.prefetch(2)
+    ds = ds.prefetch(tf.data.AUTOTUNE)
 
     print(len(ds))
 
