@@ -18,6 +18,7 @@ import pandas as pd
 # customs
 from .models import tf_models
 from .utils import losses as custom_losses
+from .utils import metrics as custom_metrics
 
 def _set_model(self, model):
     self.model = model
@@ -233,8 +234,9 @@ class TFKerasModel():
         if 'loss' in deploy_options:
             deploy_options['loss'] = tf.keras.losses.get(deploy_options['loss'])
             #deploy_options['loss'] = tf.keras.losses.CategoricalCrossentropy()
-        #deploy_options['metrics'] = list(map(custom_metrics.solve_metric, deploy_options.get('metrics', [])))
-        deploy_options['metrics'] = 'categorical_accuracy'
+
+        deploy_options['metrics'] = list(map(custom_metrics.solve_metric, deploy_options.get('metrics', [])))
+        deploy_options['metrics'].append('categorical_accuracy')
 
         # workaround to fix opimizer bug in tensorflow
         if deploy_options['optimizer'] == 'adam':

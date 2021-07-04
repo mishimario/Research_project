@@ -1,0 +1,5 @@
+deploy_options.metrics:
+  - FBetaScore:
+        thresholds: 0.50
+        beta: 1.0
+        name: "pixel/F1-score"
