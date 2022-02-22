@@ -45,7 +45,9 @@ pip install -r requirements.txt
 これを行っても、足りないパッケージなどがありましたら、適宜インストールしてください。
 
 ### 学習の方法
-save_path,max_stepは任意です。configはconfigs/additionals/metrics.yaml
+save_path,max_stepは任意です。configはconfigs/additionals/metrics.yamlを指定すると、各クラスのpixelbaseのFbetascore、regionbaseのFbetascoreをmetricsとして追加できます。
+今回は実験途中でsegmentator/data/JPEGImages3168しか使っておりません。JPEGImages3817のほうを使う場合は注意してください。テストデータはこのデータの後半300枚を使っています。
+すべて使うとテストデータの価値はなくなります。
 ```shell
 python3 -m segmentator train \
     --config \
@@ -53,7 +55,7 @@ python3 -m segmentator train \
         configs/additionals/data_options.yaml \
         configs/additionals/deploy_options.yaml \
         configs/additionals/metrics.yaml \
-    --save_path results_real2 \
+    --save_path results2 \
     --data_path \
         segmentator/data/JPEGImages3168 \
         segmentator/data/SegmentationClass3168_yolo \
