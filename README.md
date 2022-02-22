@@ -6,8 +6,8 @@ GPUのメモリなどが少なかったりすると動かない可能性があ�
 などがあると適切に開けると思います。
 
 # はじめに
-これは動画からキャプションを生成するためのプログラムです。
-すでに、全てのデータ、特徴量となるデータ、出力結果などは保存されています。
+これは画像のセグメンテーションを行うためのプログラムです。
+
 
 
 
@@ -15,47 +15,27 @@ GPUのメモリなどが少なかったりすると動かない可能性があ�
 細かい部分は省略しました。赤文字のファイルは動かす必要はありません。すでにデータはフォルダに存在します。
 もし動かす場合は中身のpathなどを適切なものに書き換える必要があります。また、赤文字のファイルは直接動かす前提で書いています。
 + configs　設定ファイルフォルダ
-+ estimator　プログラムのメインフォルダ
++ segmentator　プログラムのメインフォルダ
    + data　データフォルダ
-       + bdd100k_info　infoデータのフォルダ
-       + processed　処理済みデータフォルダ
-           + attn VAモデルからの特徴量のデータセットフォルダ
-           + cam　前処理済み画像フレームデータセットフォルダ
-           + cap　キャプションデータセットフォルダ
-           + log　infoデータセットフォルダ
-       + BDD-X-Annotations_v1.csv　元々のキャプションデータのcsv
+       + JPEGImages3168　3168枚の画像フォルダ
+       + JPEGImages3817　3817枚の画像フォルダ
+       + SegmentationClass3168_yolo　JPEGImages3168に対応するセグメンテーションの教師画像フォルダ
+       + SegmentationClass3817_yolo　JPEGImages3817に対応するセグメンテーションの教師画像フォルダ
+       + Test_images　JPEGImages3817からとってきたテスト用の画像
    + models　モデルフォルダ
    + run　実行フォルダ
-   + src　前処理などの関数フォルダ
    + utils　その他の関数フォルダ
    + __ main __.py　メインファイル
-   + data_generator.py　データ生成ファイル
-   + data_load.py　データロードファイル
+   + data.py　データロードファイル
    + engine.py　学習エンジンファイル
-   + <span style="color: red; ">Step0_download_BDDVdata.py</span>　元データからデータをダウンロードするファイル
-   + <span style="color: red; ">Step1_preprocessing.py</span>　ダウンロードしたデータを前処理するファイル
-   + <span style="color: red; ">Step4_preprocessing_explanation.py</span>　キャプションのための前処理をするファイル
-   + <span style="color: red; ">temp_caption.py</span>　別々にキャプションを分けるファイル
-   + <span style="color: red; ">temp_time.py</span>　時間情報を連結するファイル
-+ pre60　事前学習モデルの重みと結果のフォルダ
-+ tempva　VAモデル（Vehicle Controller)の重みと結果のフォルダ
-+ teacher_force_result キャプション生成モデルの重みと結果のフォルダ(teacher forcing 有り)
-+ sampled_result　キャプション生成モデルの重みと結果のフォルダ(weak sampled)
-+ use_logits_result　キャプション生成モデルの重みと結果のフォルダ(teacher forcing 無し)
-+ test_sampled_generate_result　テストデータに対するsampled_resultを用いたキャプション生成結果フォルダ
-+ test_teacher_force_generate_result　テストデータに対するteacher_force_resultを用いたキャプション生成結果フォルダ
-+ test_use_logits_generate_result　テストデータに対するuse_logits_resultを用いたキャプション生成結果フォルダ
-+ val_sampled_generate_result　検証データに対するsampled_resultを用いたキャプション生成結果フォルダ
-+ val_teacher_force_generate_result　検証データに対するteacher_force_resultを用いたキャプション生成結果フォルダ
-+ val_use_logits_generate_result　検証データに対するuse_logits_resultを用いたキャプション生成結果フォルダ
-+ <span style="color: red; ">captions_show.py</span>　キャプション表示ファイル
++ result_real2
 + requirements.text　必要となるパッケージ情報
 + README.md　説明ファイル
 
 
 # 実際の動かし方
 学習に関しては適切な環境でないと動かないと思いますが、学習についても記します。
-例を参考に説明します。また、全てestimatorフォルダが存在するディレクトリで実行するのが前提です。
+例を参考に説明します。また、全てsegmentatorフォルダが存在するディレクトリで実行するのが前提です。
 
 ### 動かす前に
 必要なパッケージを以下でインストールします。
@@ -63,4 +43,33 @@ GPUのメモリなどが少なかったりすると動かない可能性があ�
 pip install -r requirements.txt
 ```
 これを行っても、足りないパッケージなどがありましたら、適宜インストールしてください。
-requirements.txtの中のコメントも役に立つかもしれません。
+
+### 学習の方法
+save_path,max_stepは任意です。configはconfigs/additionals/metrics.yaml
+```shell
+python3 -m segmentator train \
+    --config \
+        configs/unet.yaml \
+        configs/additionals/data_options.yaml \
+        configs/additionals/deploy_options.yaml \
+        configs/additionals/metrics.yaml \
+    --save_path results_real2 \
+    --data_path \
+        segmentator/data/JPEGImages3168 \
+        segmentator/data/SegmentationClass3168_yolo \
+    --max_steps \
+        50 \
+```
+
+### 推論の方法
+```shell
+python3 -m segmentator predict \
+    --config \
+        configs/unet.yaml \
+        configs/additionals/deploy_options.yaml \
+    --save_path /kw_resources/Research_with_MAZDA/results_predict \
+    --data_path \
+        /kw_resources/Research_with_MAZDA/segmentator/data/Test_images \
+    --ckpt_dir_path \
+        /kw_resources/Research_with_MAZDA/results_real2/checkpoints \
+```

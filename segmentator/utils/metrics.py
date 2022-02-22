@@ -69,7 +69,7 @@ class FBetaScore(tf.keras.metrics.Metric):
         recall =tf.stack([self.recall[i].result() for i in range(self.n_label)])
 
         score = (1 + self.beta**2) * precision * recall / (self.beta**2 * precision + recall + self.epsilon)
-        return score
+        return {"background": score[0], "car": score[1], "crosswalk": score[2], "person": score[3], "traffic_light_blue": score[4], "traffic_light_red": score[5], "traffic_light_yellow": score[6]}
 
     def reset_state(self):
         for i in range(self.n_label):
@@ -377,7 +377,7 @@ class RegionBasedFBetaScore(FBetaScore):
         recall = self.recall.result()
         result = (1 + self.beta**2) * precision * recall / (self.beta**2 * precision + recall + self.epsilon)
         result = tf.squeeze(result)
-        return result
+        return {"background_region": result[0], "car_region": result[1], "crosswalk_region": result[2], "person_region": result[3], "traffic_light_blue_region": result[4], "traffic_light_red_region": result[5], "traffic_light_yellow_region": result[6]}
 
     def get_config(self):
         """Returns the serializable config of the metric."""
