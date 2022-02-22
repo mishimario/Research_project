@@ -29,7 +29,7 @@ class Downsample(Layer):
         kernel_regularizer=None,
         **kargs,
     ):
-        super().__init__(self, **kargs)
+        super().__init__(**kargs)
         self.configs = dict(
             filters=filters,
             rate=rate,
@@ -59,6 +59,7 @@ class Downsample(Layer):
             self.pool = keras.Sequential([self.pool, layers.BatchNormalization(trainable=trainable)])
 
         self.convchain = keras.Sequential(convs)
+        #super().__init__(self, **kargs)
         return
 
     def get_config(self):
@@ -97,7 +98,7 @@ class Latent(Layer):
         kernel_regularizer=None,
         **kargs,
     ):
-        super().__init__(self, **kargs)
+        super().__init__(**kargs)
         self.configs = dict(
             filters=filters_first*2**(n_downsample),
             rate=rate,
@@ -159,7 +160,7 @@ class Upsample(Layer):
         kernel_regularizer=None,
         **kargs,
     ):
-        super().__init__(self, **kargs)
+        super().__init__(**kargs)
         self.configs = dict(
             filters=filters,
             rate=rate,
@@ -210,6 +211,7 @@ class Upsample(Layer):
         conv_output_shape = self.conv_transpose.compute_output_shape(input_shape)
         print(conv_output_shape)
         convchain_input_shape = (*conv_output_shape[:3], + conv_output_shape[3] + ref_shape[3])
+        print(convchain_input_shape)
         self.convchain.build(convchain_input_shape)
         self.built = True
         return
@@ -228,6 +230,7 @@ class Upsample(Layer):
         paded = tf.image.pad_to_bounding_box(tconv0, tf.shape(reference)[1]-tf.shape(tconv0)[1], tf.shape(reference)[2]-tf.shape(tconv0)[2], tf.shape(reference)[1], tf.shape(reference)[2])
         concatenated = tf.concat([paded, reference], axis=-1)
         conved = self.convchain(concatenated, training=training)
+        print(conved.shape)
         return conved
 
 
@@ -248,7 +251,7 @@ class Encoder(Layer):
         kernel_regularizer=None,
         **kargs,
     ):
-        super().__init__(self, **kargs)
+        super().__init__(**kargs)
         self.configs = dict(
             filters_first=filters_first,
             n_downsample=n_downsample,
@@ -283,6 +286,7 @@ class Encoder(Layer):
                 )
             )
             next_filters = int(rate * next_filters)
+        #super().__init__(self, **kargs)
         return
 
     def get_config(self):
@@ -326,7 +330,7 @@ class Decoder(Layer):
         kernel_regularizer=None,
         **kargs,
     ):
-        super().__init__(self, **kargs)
+        super().__init__(**kargs)
         self.configs = dict(
             rate=rate,
             kernel_size=kernel_size,

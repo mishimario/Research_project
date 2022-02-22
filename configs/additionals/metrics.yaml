@@ -3,3 +3,10 @@ deploy_options.metrics:
         thresholds: 0.50
         beta: 1.0
         name: "pixel/F1-score"
+  # - RegionBasedFBetaScore:
+  #       thresholds: 0.50
+  #       IoU_threshold: 0.30
+  #       resize_factor: 1.0
+  #       beta: 1.0
+  #       n_label: 7
+  #       name: "region/F1-score"

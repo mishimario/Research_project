@@ -63,17 +63,21 @@ def train(
 
     ds = data.train_ds(data_path[0], data_path[1], **config['data_options']['train'])
     print(len(ds))
+    print(visualize)
     if validate:
         assert val_data_path is not None
         val_ds = data.eval_ds(val_data_path, **config['data_options']['eval'])
     else: val_ds = None
 
-    # if visualize:
-    #     visualization = {
-    #         'train': data.eval_ds(data_path, **config['data_options']['eval'], include_meta=True),
-    #         'validation': data.eval_ds(val_data_path, **config['data_options']['eval'], include_meta=True),
-    #     }
-    # else: visualization = {}
+    if visualize:
+        visualization = {
+            'train': data.eval_ds(data_path[0],data_path[1], **config['data_options']['eval']),
+            #'validation': data.eval_ds(val_data_path, **config['data_options']['eval'], include_meta=True),
+        }
+        print('yes')
+    else:
+        visualization = {}
+        print('No')
 
     model = engine.TFKerasModel(config)
     results = model.train(
@@ -83,7 +87,7 @@ def train(
         early_stop_steps=early_stop_steps,
         save_freq=save_freq,
         val_data=val_ds,
-        # visualization=visualization,
+        visualization=visualization,
         profile=profile,
     )
 

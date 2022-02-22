@@ -19,6 +19,7 @@ import pandas as pd
 from .models import tf_models
 from .utils import losses as custom_losses
 from .utils import metrics as custom_metrics
+from .utils import callbacks as custom_callbacks
 
 def _set_model(self, model):
     self.model = model
@@ -101,10 +102,19 @@ class TFKerasModel():
             tb_callback = tf.keras.callbacks.TensorBoard(tfevents_path, update_freq='epoch', profile_batch=int(profile) * 200)
             tb_callback.set_model(self.model)
             callbacks.append(tb_callback)
+            for tag, viz_ds in visualization.items():
+                viz_callback = custom_callbacks.Visualizer(tag, viz_ds, save_freq, tfevents_path)
+
+                # if tb_callback already have a writer for it, reuse it
+                try: viz_callback.writer = getattr(tb_callback, f'_{tag}_writer')
+                except AttributeError: pass
+                callbacks.append(viz_callback)
 
         if early_stop_steps is not None:
             stopper = tf.keras.callbacks.EarlyStopping(patience=early_stop_steps, verbose=1)
             callbacks.append(stopper)
+
+        callbacks.append(custom_callbacks.TFProgress())
 
         results = self.model.fit(
             dataset,

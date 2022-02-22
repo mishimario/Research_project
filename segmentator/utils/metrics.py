@@ -13,7 +13,7 @@ import tensorflow_addons as tfa
 import numpy as np
 
 # custom
-#from . import image as custom_image_ops
+from . import image as custom_image_ops
 
 
 def solve_metric(metric_spec):
@@ -35,16 +35,14 @@ def solve_metric(metric_spec):
 
 
 class FBetaScore(tf.keras.metrics.Metric):
-    def __init__(self, beta, thresholds, epsilon=1e-07, **kargs):
+    def __init__(self, beta, thresholds, epsilon=1e-07, n_label=7, **kargs):
         super().__init__(**kargs)
         assert beta > 0
         self.beta = beta
         self.epsilon = epsilon
         self.thresholds = thresholds
-        self.precision = None
-        self.recall = None
-        self.n_label = 0
-        #self.prepare_precision_recall()
+        self.n_label = n_label
+        self.prepare_precision_recall()
         return
 
     def prepare_precision_recall(self):
@@ -53,27 +51,23 @@ class FBetaScore(tf.keras.metrics.Metric):
         return
 
     def update_state(self, y_true, y_pred, sample_weight=None):
-        #y_true = tf.transpose(y_true, perm=[1,2,3,0])
-        #y_pred = tf.transpose(y_pred, perm=[1,2,3,0])
-        if self.precision is None or self.recall is None:
-            _, _, _, self.n_label = y_true.shape
-            self.prepare_precision_recall()
-            #self.precision = tf.map_fn(fn=lambda _:tf.keras.metrics.Precision(thresholds=self.thresholds), elems=y_true)
-            #self.recall = tf.map_fn(fn=lambda _:tf.keras.metrics.Recall(thresholds=self.thresholds), elems=y_true)
-
         for i in range(self.n_label):
             self.precision[i].update_state(y_true[:,:,:,i], y_pred[:,:,:,i], sample_weight=sample_weight)
             self.recall[i].update_state(y_true[:,:,:,i], y_pred[:,:,:,i], sample_weight=sample_weight)
-        #tf.map_fn(fn=lambda x: x[0].update_state(x[1], x[2], sample_weight=sample_weight),elems=[self.precision, y_true, y_pred])
-        #self.precision.update_state(y_true, y_pred, sample_weight=sample_weight)
-        #self.recall.update_state(y_true, y_pred, sample_weight=sample_weight)
+
+        #tf.map_fn(
+        #    lambda i: [self.precision[i].update_state(y_true[:,:,:,i], y_pred[:,:,:,i], sample_weight=sample_weight),
+        #    self.recall[i].update_state(y_true[:,:,:,i], y_pred[:,:,:,i], sample_weight=sample_weight)],
+        #    tf.range(self.n_label),
+        #    parallel_iterations=cpu_count(),
+        #)
+
         return
 
     def result(self):
         precision =tf.stack([self.precision[i].result() for i in range(self.n_label)])
         recall =tf.stack([self.recall[i].result() for i in range(self.n_label)])
-        #precision = self.precision.result()
-        #recall = self.recall.result()
+
         score = (1 + self.beta**2) * precision * recall / (self.beta**2 * precision + recall + self.epsilon)
         return score
 
@@ -90,8 +84,495 @@ class FBetaScore(tf.keras.metrics.Metric):
             'beta': self.beta,
             'epsilon': self.epsilon,
             'thresholds': self.thresholds,
+            #'resize_factor': self.resize_factor,
+        })
+        return config
+
+
+class _RegionBasedMetric(tf.keras.metrics.Metric):
+    '''abstract class to provide common methods for region based metrics
+    Args:
+        thresholds: scalar or vector of thresholds
+        IoU_threshold: minimum IoU between prediction and label
+            required to be considered "successful detected"
+        epsilon: small number to avoid devision by zero
+        resize_factor: resizing factor of images before being processed.
+            setting this lower than 1 will save some ram
+            at the cost evaluation accuracy.
+    '''
+    def __init__(self, thresholds, IoU_threshold=0.30, epsilon=1e-07, resize_factor=1.0, morph_filter_size=5, n_label=7, **kargs):
+        super().__init__(**kargs)
+        with tf.control_dependencies([tf.debugging.assert_non_negative(thresholds)]):
+            self.thresholds = thresholds
+        self.IoU_threshold = IoU_threshold
+        self.epsilon = epsilon
+        self.resize_factor = resize_factor
+        self.morph_filter_size = morph_filter_size
+        self.n_label = n_label
+        return
+
+    def add_weight(self, *args, **kargs):
+        if 'synchronization' not in kargs:
+            kargs['synchronization'] = tf.VariableSynchronization.ON_WRITE
+        return super().add_weight(*args, **kargs)
+
+    @tf.function
+    def _separate_predictions(self, single_label, single_pred):
+        '''separate positive(cancer) regions
+        A mask contains multiple positive regions.
+        This method will separate those regions and generate a separeted mask for each of them
+        by applying connected components analysis.
+        For example, if a mask has N cancer regions, then this single mask will be separated into N masks.
+        Args:
+            single_label: label mask. This should not be batched.
+            single_pred: prediction mask. This should not be batched.
+                A prediction should be already be thresholded.
+        Returns:
+            indiced_label: label mask for each cancer region.
+            indiced_pred: prediction mask for each predicted cancer region.
+        '''
+        single_label = single_label > 0.5
+        cca_label = tfa.image.connected_components(single_label)
+        indiced_label = tf.one_hot(
+            cca_label, tf.reduce_max(cca_label) + 1, axis=0, dtype=tf.bool, on_value=True, off_value=False)[1:]
+
+        single_pred = tf.broadcast_to(
+            tf.cast(single_pred, tf.float32),
+            [tf.shape(self.thresholds)[0], tf.shape(single_pred)[0], tf.shape(single_pred)[1]],
+        )
+        single_pred = tf.transpose(tf.transpose(single_pred, [1, 2, 0]) >= self.thresholds, [2, 0, 1])
+        single_pred = tf.squeeze(
+            custom_image_ops.morph_open(tf.expand_dims(tf.cast(single_pred, tf.int8), -1), self.morph_filter_size),
+            -1,
+        )
+        cca_pred = tfa.image.connected_components(single_pred)
+        # cca_pred dims: n_thresholds, H, W
+        min_indices = -tf.sparse.reduce_max(tf.sparse.from_dense(-cca_pred), axis=[1, 2]) - 1
+        should_shift = tf.cast(min_indices > 0, min_indices.dtype)
+        substractor = tf.transpose(tf.broadcast_to(
+            min_indices * should_shift,
+            [tf.shape(single_pred)[1], tf.shape(single_pred)[2], tf.shape(self.thresholds)[0]],
+        ), [2, 0, 1])
+        substractor = tf.zeros_like(cca_pred) + substractor * tf.cast(cca_pred > 0, tf.int32)
+        cca_pred = cca_pred - substractor
+        # cca_pred dims: n_thresholds, H, W
+        indiced_pred = tf.one_hot(
+            cca_pred, tf.reduce_max(cca_pred) + 1, axis=0, dtype=tf.bool, on_value=True, off_value=False)[1:]
+        # indiced_pred dims: masks, n_thresholds, H, W
+        indiced_pred = tf.transpose(indiced_pred, [0, 2, 3, 1])
+        # indiced_pred dims: masks, H, W, thresholds
+        lengths = tf.reduce_any(indiced_pred, axis=[1, 2])
+        existence_indicator = tf.reduce_any(lengths, axis=[0])
+        if tf.shape(indiced_pred)[0] > 0:
+            lengths = tf.argmin(tf.cast(lengths, tf.uint8), axis=0)
+            lengths = (tf.cast(lengths == 0, lengths.dtype) * tf.cast(existence_indicator, lengths.dtype)
+                       * tf.cast(tf.shape(indiced_pred)[0], lengths.dtype)
+                       + lengths)
+        else:
+            lengths = tf.zeros(tf.shape(self.thresholds), tf.int64)
+        return indiced_label, indiced_pred, lengths
+
+    @tf.function
+    def _IoU(self, indiced_label, indiced_pred):
+        '''
+        given multiple label cancer region masks and multiple predicted cancer region masks,
+        this method will calculate IoU.
+        Args:
+            indiced_label: label cancer masks
+                shape: [N_masks, height, width], dtype: tf.bool
+            cancer_pred: single cancer prediction mask
+                shape: [M_masks, height, width, N_thresholds], dtype: tf.bool
+        Returns:
+            IoU vector
+                shape: [N_masks, M_masks, N_thresholds]
+        '''
+        n_label_mask, n_pred_mask = tf.shape(indiced_label)[0], tf.shape(indiced_pred)[0]
+        n_thresholds = tf.shape(self.thresholds)[0]
+        intermediate_shape = [n_label_mask, n_pred_mask, tf.shape(indiced_label)[1], tf.shape(indiced_label)[2], n_thresholds]
+
+        indiced_label = tf.transpose(tf.broadcast_to(
+            indiced_label,
+            [n_pred_mask, n_thresholds, n_label_mask, tf.shape(indiced_label)[1], tf.shape(indiced_label)[2]],
+        ), [2, 0, 3, 4, 1])
+        indiced_pred = tf.broadcast_to(indiced_pred, intermediate_shape)
+        intersection = tf.reduce_sum(tf.cast(indiced_label & indiced_pred, tf.float32), axis=[2, 3])
+        union = tf.reduce_sum(tf.cast(indiced_label | indiced_pred, tf.float32), axis=[2, 3])
+        iou = intersection / union
+        return iou
+
+    def resize(self, image):
+        # image: [batch, W, H, C, 2(true+pred)]
+        print(image)
+        print(self.resize_factor)
+        target_width = tf.cast(tf.cast(tf.shape(image)[1], tf.float16) * self.resize_factor, tf.int32)
+        target_height = tf.cast(tf.cast(tf.shape(image)[2], tf.float16) * self.resize_factor, tf.int32)
+
+        #resized_image = tf.map_fn(lambda img: tf.image.resize(img, [target_width, target_height]),image)
+        resized_image = tf.stack([tf.image.resize(image[:,:,:,:,0], [target_width, target_height]),tf.image.resize(image[:,:,:,:,1], [target_width, target_height])],axis=-1)
+        #print(tf.image.resize(image[:,:,:,:,0], [360, target_height]))
+        #image = tf.transpose(image, [0, 4, 1, 2, 3])
+        return resized_image
+
+    @tf.function
+    def get_tp_fn(self, y_true, y_pred, sample_weight):
+        if sample_weight is not None: raise NotImplementedError
+        y_true = tf.cast(y_true, tf.float32)
+        #y_pred = tf.squeeze(y_pred, -1)
+        y_true_pred = tf.cast(tf.stack([y_true, y_pred], axis=-1), tf.float32)
+        y_true_pred = self.resize(y_true_pred)  # [batch, W, H, C, 2]
+        y_true_pred = tf.transpose(y_true_pred, [0, 3, 4, 1, 2])  # [batch, C, 2, W, H]
+
+        tp_array, fn_array = tf.map_fn(
+            lambda chunnel_two_pred: tf.map_fn(
+                lambda single_label_pred: self.get_label_detected(single_label_pred[0], single_label_pred[1]),
+                chunnel_two_pred,
+                fn_output_signature=(tf.int32, tf.int32),
+                #parallel_iterations=cpu_count(),
+            ),
+            y_true_pred,
+            fn_output_signature=(tf.int32,tf.int32),
+            parallel_iterations=cpu_count(),
+        )
+        tp = tf.reduce_sum(tp_array, axis=0)
+        fn = tf.reduce_sum(fn_array, axis=0)
+        return tp, fn
+
+    @tf.function
+    def get_label_detected(self, single_label, single_pred):
+        indiced_label, indiced_pred, pred_masks = self._separate_predictions(single_label, single_pred)
+
+        IoU_matrix = self._IoU(indiced_label, indiced_pred)
+        label_detected = tf.reduce_any(IoU_matrix > self.IoU_threshold, axis=1)
+
+        tp = tf.reduce_sum(tf.cast(label_detected, tf.int32), axis=0)
+        fn = tf.reduce_sum(tf.cast(~label_detected, tf.int32), axis=0)
+        return tp, fn
+
+    @tf.function
+    def get_tp_fp(self, y_true, y_pred, sample_weight):
+        if sample_weight is not None: raise NotImplementedError
+        y_true = tf.cast(y_true, tf.float32)
+        #y_pred = tf.squeeze(y_pred, -1)
+        y_true_pred = tf.cast(tf.stack([y_true, y_pred], axis=-1), tf.float32)
+        print(y_true_pred)
+        y_true_pred = self.resize(y_true_pred)  # [batch, W, H, C, 2]
+        print(y_true_pred)
+        y_true_pred = tf.transpose(y_true_pred, [0, 3, 4, 1, 2])  # [batch, C, 2, W, H]
+        print(y_true_pred)
+
+        tp_array, fp_array = tf.map_fn(
+            lambda chunnel_two_pred: tf.map_fn(
+                lambda single_label_pred: self.get_tp_pred(single_label_pred[0], single_label_pred[1]),
+                chunnel_two_pred,
+                fn_output_signature=(tf.int32, tf.int32),
+                #parallel_iterations=cpu_count(),
+            ),
+            y_true_pred,
+            fn_output_signature=(tf.int32,tf.int32),
+            parallel_iterations=cpu_count(),
+        )
+
+        tp = tf.reduce_sum(tp_array, axis=0)
+        fp = tf.reduce_sum(fp_array, axis=0)
+        return tp, fp
+
+    @tf.function
+    def get_tp_pred(self, single_label, single_pred):
+        indiced_label, indiced_pred, n_pred_masks = self._separate_predictions(single_label, single_pred)
+
+        IoU_matrix = self._IoU(indiced_label, indiced_pred)
+        tp_pred = tf.reduce_any(IoU_matrix > self.IoU_threshold, axis=0)
+        tp_pred = tf.RaggedTensor.from_tensor(tf.transpose(tp_pred), n_pred_masks)
+
+        tp = tf.reduce_sum(tf.cast(tp_pred, tf.int32), axis=1)
+        fp = tf.reduce_sum(tf.cast(~tp_pred, tf.int32), axis=1)
+        return tp, fp
+
+    @tf.function
+    def get_tp_fn_fp(self, y_true, y_pred, sample_weight, return_raw=False):
+        if sample_weight is not None: raise NotImplementedError
+        y_true = tf.cast(y_true, tf.float32)
+        #y_pred = tf.squeeze(y_pred, -1)
+        y_true_pred = tf.cast(tf.stack([y_true, y_pred], axis=-1), tf.float32)
+        y_true_pred = self.resize(y_true_pred)  # [batch, W, H, C, 2]
+        y_true_pred = tf.transpose(y_true_pred, [0, 3, 4, 1, 2])  # [batch, C, 2, W, H]
+
+        tp_array, fn_array, fp_array = tf.map_fn(
+            lambda chunnel_two_pred: tf.map_fn(
+                lambda single_label_pred: self._get_tp_fn_fp(single_label_pred[0], single_label_pred[1]),
+                chunnel_two_pred,
+                fn_output_signature=(tf.int32, tf.int32, tf.int32),
+                #parallel_iterations=cpu_count(),
+            ),
+            y_true_pred,
+            fn_output_signature=(tf.int32,tf.int32, tf.int32),
+            parallel_iterations=cpu_count(),
+        )
+
+        if return_raw: return tp_array, fn_array, fp_array
+
+        tp = tf.reduce_sum(tp_array, axis=0)
+        fn = tf.reduce_sum(fn_array, axis=0)
+        fp = tf.reduce_sum(fp_array, axis=0)
+        return tp, fn, fp
+
+    @tf.function
+    def _get_tp_fn_fp(self, single_label, single_pred):
+        indiced_label, indiced_pred, n_pred_masks = self._separate_predictions(single_label, single_pred)
+        IoU_matrix = self._IoU(indiced_label, indiced_pred)
+
+        label_detected = tf.reduce_any(IoU_matrix > self.IoU_threshold, axis=1)
+        tp = tf.reduce_sum(tf.cast(label_detected, tf.int32), axis=0)
+        fn = tf.reduce_sum(tf.cast(~label_detected, tf.int32), axis=0)
+
+        tp_pred = tf.reduce_any(IoU_matrix > self.IoU_threshold, axis=0)
+        tp_pred = tf.RaggedTensor.from_tensor(tf.transpose(tp_pred), n_pred_masks)
+        fp = tf.reduce_sum(tf.cast(~tp_pred, tf.int32), axis=1)
+        return tp, fn, fp
+
+    def get_config(self):
+        configs = super().get_config()
+        configs['thresholds'] = self.thresholds
+        configs['IoU_threshold'] = self.IoU_threshold
+        configs['epsilon'] = self.epsilon
+        configs['resize_factor'] = self.resize_factor
+        return configs
+
+
+class RegionBasedFBetaScore(FBetaScore):
+    def __init__(self, beta, thresholds, IoU_threshold=0.30, epsilon=1e-07, n_label=7, resize_factor=1.0, **kargs):
+        self.IoU_threshold = IoU_threshold
+        self.resize_factor = resize_factor
+        super().__init__(beta=beta, thresholds=thresholds, epsilon=epsilon, n_label=n_label, **kargs)
+        return
+
+    def prepare_precision_recall(self):
+        self.precision = RegionBasedPrecision(
+            thresholds=self.thresholds,
+            IoU_threshold=self.IoU_threshold,
+            epsilon=self.epsilon,
+            resize_factor=self.resize_factor,
+        )
+
+        self.recall = RegionBasedRecall(
+            thresholds=self.thresholds,
+            IoU_threshold=self.IoU_threshold,
+            epsilon=self.epsilon,
+            resize_factor=self.resize_factor,
+        )
+        return
+
+    def reset_state(self):
+        self.precision.reset_state()
+        self.recall.reset_state()
+        return
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        self.precision.update_state(y_true, y_pred, sample_weight)
+        self.recall.update_state(y_true, y_pred, sample_weight)
+        return
+
+    def result(self):
+        precision = self.precision.result()
+        recall = self.recall.result()
+        result = (1 + self.beta**2) * precision * recall / (self.beta**2 * precision + recall + self.epsilon)
+        result = tf.squeeze(result)
+        return result
+
+    def get_config(self):
+        """Returns the serializable config of the metric."""
+        config = super().get_config()
+        config.update({
+            'IoU_threshold': self.IoU_threshold,
             'resize_factor': self.resize_factor,
         })
         return config
 
+
+class RegionBasedRecall(_RegionBasedMetric):
+    def __init__(self, thresholds, IoU_threshold=0.30, epsilon=1e-07, n_label=7, **kargs):
+        thresholds = tf.reshape(thresholds, [-1])
+        super().__init__(thresholds, IoU_threshold, epsilon, n_label=n_label, **kargs)
+        self.tp_count = self.add_weight(
+            'tp_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        self.fn_count = self.add_weight(
+            'fn_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        return
+
+    def reset_state(self):
+        self.tp_count.assign(tf.zeros_like(self.tp_count))
+        self.fn_count.assign(tf.zeros_like(self.fn_count))
+        return
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        tp, fn = self.get_tp_fn(y_true, y_pred, sample_weight)
+        self.tp_count.assign_add(tp)
+        self.fn_count.assign_add(fn)
+        return
+
+    def result(self):
+        result = tf.cast(self.tp_count, tf.float32) / (tf.cast(self.tp_count + self.fn_count, tf.float32) + self.epsilon)
+        result = tf.squeeze(result)
+        return result
+
+
+class RegionBasedPrecision(_RegionBasedMetric):
+    def __init__(self, thresholds, IoU_threshold=0.30, epsilon=1e-07, n_label=7, **kargs):
+        thresholds = tf.reshape(thresholds, [-1])
+        super().__init__(thresholds, IoU_threshold, epsilon, n_label=n_label, **kargs)
+        self.tp_count = self.add_weight(
+            'tp_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        self.fp_count = self.add_weight(
+            'fp_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        return
+
+    def reset_state(self):
+        self.tp_count.assign(tf.zeros_like(self.tp_count))
+        self.fp_count.assign(tf.zeros_like(self.fp_count))
+        return
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        tp, fp = self.get_tp_fp(y_true, y_pred, sample_weight)
+        self.tp_count.assign_add(tp)
+        self.fp_count.assign_add(fp)
+        return
+
+    def result(self):
+        result = tf.cast(self.tp_count, tf.float32) / (tf.cast(self.tp_count + self.fp_count, tf.float32) + self.epsilon)
+        result = tf.squeeze(result)
+        return result
+
+
+class RegionBasedTruePositives(_RegionBasedMetric):
+    def __init__(self, thresholds, IoU_threshold=0.30, epsilon=1e-07, n_label=7, **kargs):
+        thresholds = tf.reshape(thresholds, [-1])
+        super().__init__(thresholds, IoU_threshold, epsilon, n_label=n_label, **kargs)
+        self.tp_count = self.add_weight(
+            'tp_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        return
+
+    def reset_state(self):
+        self.tp_count.assign(tf.zeros_like(self.tp_count))
+        return
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        tp, fn = self.get_tp_fn(y_true, y_pred, sample_weight)
+        self.tp_count.assign_add(tp)
+        return
+
+    def result(self):
+        result = self.tp_count
+        result = tf.squeeze(result)
+        return result
+
+
+class RegionBasedFalsePositives(_RegionBasedMetric):
+    def __init__(self, thresholds, IoU_threshold=0.30, epsilon=1e-07, n_label=7, **kargs):
+        thresholds = tf.reshape(thresholds, [-1])
+        super().__init__(thresholds, IoU_threshold, epsilon, n_label=n_label, **kargs)
+        self.fp_count = self.add_weight(
+            'fp_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        return
+
+    def reset_state(self):
+        self.fp_count.assign(tf.zeros_like(self.fp_count))
+        return
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        tp, fp = self.get_tp_fp(y_true, y_pred, sample_weight)
+        self.fp_count.assign_add(fp)
+        return
+
+    def result(self):
+        result = self.fp_count
+        result = tf.squeeze(result)
+        return result
+
+
+class RegionBasedFalseNegatives(_RegionBasedMetric):
+    def __init__(self, thresholds, IoU_threshold=0.30, epsilon=1e-07, n_label=7, **kargs):
+        thresholds = tf.reshape(thresholds, [-1])
+        super().__init__(thresholds, IoU_threshold, epsilon, n_label=n_label, **kargs)
+        self.fn_count = self.add_weight(
+            'fn_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        return
+
+    def reset_state(self):
+        self.fn_count.assign(tf.zeros_like(self.fn_count))
+        return
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        tp, fn = self.get_tp_fn(y_true, y_pred, sample_weight)
+        self.fn_count.assign_add(fn)
+        return
+
+    def result(self):
+        result = self.fn_count
+        result = tf.squeeze(result)
+        return result
+
+
+class RegionBasedConfusionMatrix(_RegionBasedMetric):
+    def __init__(self, thresholds, IoU_threshold=0.30, epsilon=1e-07, n_label=7, **kargs):
+        thresholds = tf.reshape(thresholds, [-1])
+        super().__init__(thresholds, IoU_threshold, epsilon, n_label=n_label, **kargs)
+        self.fn_count = self.add_weight(
+            'fn_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        self.fp_count = self.add_weight(
+            'fp_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        self.tp_count = self.add_weight(
+            'tp_count', dtype=tf.int32, shape=[self.n_label, tf.shape(self.thresholds)[0]], initializer=tf.zeros_initializer)
+        return
+
+    def reset_state(self):
+        self.fn_count.assign(tf.zeros_like(self.fn_count))
+        self.fp_count.assign(tf.zeros_like(self.fn_count))
+        self.tp_count.assign(tf.zeros_like(self.fn_count))
+        return
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        tp, fn, fp = self.get_tp_fn_fp(y_true, y_pred, sample_weight)
+        self.fn_count.assign_add(fn)
+        self.fp_count.assign_add(fp)
+        self.tp_count.assign_add(tp)
+        return
+
+    def result(self):
+        return np.nan
+
+    def result_dict(self):
+        recall = tf.cast(self.tp_count, tf.float32) / (tf.cast(self.tp_count + self.fn_count, tf.float32) + self.epsilon)
+        recall = tf.squeeze(recall)
+
+        precision = tf.cast(self.tp_count, tf.float32) / (tf.cast(self.tp_count + self.fp_count, tf.float32) + self.epsilon)
+        precision = tf.squeeze(precision)
+
+        result = {
+            'true_positive_counts': tf.squeeze(self.tp_count),
+            'false_positive_counts': tf.squeeze(self.fp_count),
+            'false_negative_counts': tf.squeeze(self.fn_count),
+            'recall': recall,
+            'precision': precision,
+        }
+        return result
+
+
+class DummyMetric():
+    def __init__(self, value):
+        self.value = value
+        return
+
+    def update_state(self, *args, **kargs):
+        return
+
+    def result(self):
+        return self.value
+
+
 tf.keras.utils.get_custom_objects().update(FBetaScore=FBetaScore)
+tf.keras.utils.get_custom_objects().update(RegionBasedRecall=RegionBasedRecall)
+tf.keras.utils.get_custom_objects().update(RegionBasedPrecision=RegionBasedPrecision)
+tf.keras.utils.get_custom_objects().update(RegionBasedFBetaScore=RegionBasedFBetaScore)
+tf.keras.utils.get_custom_objects().update(RegionBasedTruePositives=RegionBasedTruePositives)
+tf.keras.utils.get_custom_objects().update(RegionBasedFalsePositives=RegionBasedFalsePositives)
+tf.keras.utils.get_custom_objects().update(RegionBasedFalseNegatives=RegionBasedFalseNegatives)
